@@ -3,13 +3,16 @@
 import {
   BookOpen,
   CalendarDays,
+  Check,
   CheckCircle2,
   Clock3,
+  Edit3,
+  ListChecks,
   Plus,
-  RefreshCw,
   Sparkles,
   Target,
   Trash2,
+  X,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
@@ -24,14 +27,16 @@ type Subject = {
 
 type Session = {
   id: string;
-  day: string;
-  date: string;
   subject: string;
   minutes: number;
+  start: string;
+  end: string;
   focus: string;
+  difficulty: Difficulty;
 };
 
 const today = new Date();
+
 const dateInput = (offset: number) => {
   const date = new Date(today);
   date.setDate(today.getDate() + offset);
@@ -51,12 +56,12 @@ const difficultyWeight: Record<Difficulty, number> = {
 };
 
 const focusIdeas = [
-  'review notes and examples',
-  'solve practice questions',
-  'summarize key points',
-  'teach the topic aloud',
-  'complete a timed quiz',
-  'revise weak areas',
+  'Practice questions',
+  'Notes review',
+  'Topic summary',
+  'Timed quiz',
+  'Weak-area revision',
+  'Teach-back practice',
 ];
 
 function daysUntil(dateValue: string) {
@@ -65,44 +70,54 @@ function daysUntil(dateValue: string) {
   return Math.max(1, Math.ceil(diff / 86_400_000));
 }
 
-function formatShortDate(date: Date) {
-  return date.toLocaleDateString('en', {
-    month: 'short',
-    day: 'numeric',
-  });
+function addMinutes(hour: number, minute: number, extra: number) {
+  const total = hour * 60 + minute + extra;
+  const nextHour = Math.floor(total / 60);
+  const nextMinute = total % 60;
+  const suffix = nextHour >= 12 ? 'PM' : 'AM';
+  const displayHour = nextHour > 12 ? nextHour - 12 : nextHour;
+  return `${displayHour}:${String(nextMinute).padStart(2, '0')} ${suffix}`;
 }
 
-function buildSessions(subjects: Subject[], dailyHours: number) {
-  const dayCount = 7;
+function shortDate(date: Date) {
+  return date.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+}
+
+function buildPlan(subjects: Subject[], dailyHours: number) {
   const activeSubjects = subjects.filter((subject) => subject.name.trim());
-  const weightTotal = activeSubjects.reduce((sum, subject) => {
-    const urgency = Math.max(1, 18 - Math.min(18, daysUntil(subject.examDate)));
-    return sum + difficultyWeight[subject.difficulty] + urgency / 6;
+  const totalWeight = activeSubjects.reduce((sum, subject) => {
+    const urgency = Math.max(1, 20 - Math.min(20, daysUntil(subject.examDate)));
+    return sum + difficultyWeight[subject.difficulty] + urgency / 8;
   }, 0);
 
-  return Array.from({ length: dayCount }, (_, dayIndex) => {
+  return Array.from({ length: 7 }, (_, dayIndex) => {
     const date = new Date(today);
     date.setDate(today.getDate() + dayIndex);
 
+    let cursor = 16 * 60;
     const sessions: Session[] = activeSubjects.map((subject, subjectIndex) => {
-      const urgency = Math.max(1, 18 - Math.min(18, daysUntil(subject.examDate)));
-      const weight = difficultyWeight[subject.difficulty] + urgency / 6;
-      const minutes = Math.max(20, Math.round(((dailyHours * 60 * weight) / weightTotal) / 5) * 5);
+      const urgency = Math.max(1, 20 - Math.min(20, daysUntil(subject.examDate)));
+      const weight = difficultyWeight[subject.difficulty] + urgency / 8;
+      const minutes = Math.max(25, Math.round(((dailyHours * 60 * weight) / totalWeight) / 5) * 5);
+      const startHour = Math.floor(cursor / 60);
+      const startMinute = cursor % 60;
+      cursor += minutes + 10;
 
       return {
         id: `${dayIndex}-${subject.id}`,
-        day: dayIndex === 0 ? 'Today' : `Day ${dayIndex + 1}`,
-        date: formatShortDate(date),
         subject: subject.name,
         minutes,
+        start: addMinutes(startHour, startMinute, 0),
+        end: addMinutes(startHour, startMinute, minutes),
         focus: focusIdeas[(dayIndex + subjectIndex) % focusIdeas.length],
+        difficulty: subject.difficulty,
       };
     });
 
     return {
-      date,
-      label: dayIndex === 0 ? 'Today' : date.toLocaleDateString('en', { weekday: 'short' }),
-      shortDate: formatShortDate(date),
+      id: dayIndex,
+      name: dayIndex === 0 ? 'Today' : date.toLocaleDateString('en', { weekday: 'long' }),
+      date: shortDate(date),
       sessions,
     };
   });
@@ -112,13 +127,14 @@ export default function Home() {
   const [subjects, setSubjects] = useState(defaultSubjects);
   const [dailyHours, setDailyHours] = useState(2);
   const [completed, setCompleted] = useState<string[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const plan = useMemo(() => buildSessions(subjects, dailyHours), [subjects, dailyHours]);
+  const plan = useMemo(() => buildPlan(subjects, dailyHours), [subjects, dailyHours]);
+  const totalSessions = plan.reduce((sum, day) => sum + day.sessions.length, 0);
   const totalMinutes = plan.reduce(
-    (sum, day) => sum + day.sessions.reduce((daySum, session) => daySum + session.minutes, 0),
+    (sum, day) => sum + day.sessions.reduce((dayTotal, session) => dayTotal + session.minutes, 0),
     0,
   );
-  const totalSessions = plan.reduce((sum, day) => sum + day.sessions.length, 0);
   const progress = totalSessions ? Math.round((completed.length / totalSessions) * 100) : 0;
   const nearestExam = subjects.reduce(
     (nearest, subject) => Math.min(nearest, daysUntil(subject.examDate)),
@@ -128,12 +144,7 @@ export default function Home() {
   const addSubject = () => {
     setSubjects((current) => [
       ...current,
-      {
-        id: Date.now(),
-        name: 'New Subject',
-        difficulty: 'Medium',
-        examDate: dateInput(21),
-      },
+      { id: Date.now(), name: 'New Subject', difficulty: 'Medium', examDate: dateInput(21) },
     ]);
   };
 
@@ -155,246 +166,283 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f7f8f2] text-[#17211f]">
-      <section className="border-b border-[#d8ddd3] bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <main className="min-h-screen bg-[#eef3ef] text-[#12201c]">
+      <header className="border-b border-[#cbd8d0] bg-[#fbfcf8]">
+        <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.09em] text-[#4f776f]">
-                NotebookLM guided coding project
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#2f7567]">
+                NotebookLM assisted coding project
               </p>
-              <h1 className="mt-1 text-3xl font-semibold tracking-normal text-[#17211f] sm:text-4xl">
+              <h1 className="mt-2 text-3xl font-bold tracking-normal sm:text-4xl">
                 AI Study Planner
               </h1>
+              <p className="mt-2 max-w-2xl text-sm text-[#52645f]">
+                A simple web app that turns exam dates, subject difficulty, and available time into a structured weekly study timetable.
+              </p>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-sm sm:min-w-[430px]">
-              <Stat icon={<Target size={17} />} label="Subjects" value={subjects.length.toString()} />
-              <Stat icon={<Clock3 size={17} />} label="Weekly Hours" value={`${Math.round(totalMinutes / 60)}h`} />
-              <Stat icon={<CalendarDays size={17} />} label="Next Exam" value={`${nearestExam}d`} />
-            </div>
+            <button
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#d95f43] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#bf5037]"
+              onClick={() => setSettingsOpen(true)}
+              type="button"
+            >
+              <Edit3 size={17} />
+              Edit Plan
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Metric icon={<BookOpen size={17} />} label="Subjects" value={subjects.length.toString()} />
+            <Metric icon={<Clock3 size={17} />} label="Weekly Study" value={`${Math.round(totalMinutes / 60)}h`} />
+            <Metric icon={<CalendarDays size={17} />} label="Nearest Exam" value={`${nearestExam} days`} />
+            <Metric icon={<CheckCircle2 size={17} />} label="Completed" value={`${progress}%`} />
           </div>
         </div>
-      </section>
+      </header>
 
-      <section className="mx-auto grid max-w-7xl grid-cols-1 gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[380px_minmax(0,1fr)] lg:px-8">
-        <aside className="space-y-4">
-          <Panel>
-            <div className="flex items-center justify-between gap-3">
-              <Heading icon={<BookOpen size={20} />} title="Plan Inputs" />
-              <button
-                className="grid h-9 w-9 place-items-center rounded-md bg-[#f06d4f] text-white transition hover:bg-[#d95c41]"
-                onClick={addSubject}
-                title="Add subject"
-                type="button"
-              >
-                <Plus size={18} />
-              </button>
-            </div>
-
-            <label className="mt-5 block text-sm font-medium text-[#384642]">
-              Daily study time
-              <input
-                className="mt-2 w-full accent-[#1f8a70]"
-                max="6"
-                min="1"
-                onChange={(event) => setDailyHours(Number(event.target.value))}
-                type="range"
-                value={dailyHours}
-              />
-            </label>
-            <div className="mt-2 flex items-center justify-between text-sm text-[#63716c]">
-              <span>1 hour</span>
-              <strong className="rounded-md bg-[#e8f2ed] px-3 py-1 text-[#1f6d5c]">
-                {dailyHours} hours per day
-              </strong>
-              <span>6 hours</span>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {subjects.map((subject) => (
-                <div
-                  className="rounded-lg border border-[#d8ddd3] bg-[#fbfcf7] p-3"
-                  key={subject.id}
-                >
-                  <div className="flex gap-2">
-                    <input
-                      className="min-w-0 flex-1 rounded-md border border-[#cbd3cc] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#1f8a70] focus:ring-2 focus:ring-[#1f8a70]/20"
-                      onChange={(event) => updateSubject(subject.id, 'name', event.target.value)}
-                      value={subject.name}
-                    />
-                    <button
-                      className="grid h-9 w-9 place-items-center rounded-md border border-[#e1c7bd] text-[#b64d36] transition hover:bg-[#fff0eb]"
-                      onClick={() => removeSubject(subject.id)}
-                      title="Remove subject"
-                      type="button"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <select
-                      className="rounded-md border border-[#cbd3cc] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f8a70] focus:ring-2 focus:ring-[#1f8a70]/20"
-                      onChange={(event) =>
-                        updateSubject(subject.id, 'difficulty', event.target.value as Difficulty)
-                      }
-                      value={subject.difficulty}
-                    >
-                      <option>Low</option>
-                      <option>Medium</option>
-                      <option>High</option>
-                    </select>
-                    <input
-                      className="rounded-md border border-[#cbd3cc] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f8a70] focus:ring-2 focus:ring-[#1f8a70]/20"
-                      onChange={(event) => updateSubject(subject.id, 'examDate', event.target.value)}
-                      type="date"
-                      value={subject.examDate}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel>
-            <Heading icon={<Sparkles size={20} />} title="Study Tips" />
-            <ul className="mt-4 space-y-3 text-sm text-[#4b5955]">
-              <li>Start each session with one clear goal.</li>
-              <li>Give harder subjects the freshest part of your day.</li>
-              <li>Use short quizzes after reading to check understanding.</li>
-              <li>Review completed topics again before the exam date.</li>
-            </ul>
-          </Panel>
-        </aside>
-
-        <section className="space-y-5">
-          <Panel>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <section className="mx-auto grid max-w-6xl grid-cols-1 gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_310px] lg:px-8">
+        <section className="rounded-lg border border-[#cbd8d0] bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-3 border-b border-[#e2e8e4] pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <IconBox>
+                <ListChecks size={20} />
+              </IconBox>
               <div>
-                <Heading icon={<CalendarDays size={20} />} title="Generated 7-Day Plan" />
-                <p className="mt-1 text-sm text-[#63716c]">
-                  Sessions are shared by subject difficulty and exam urgency.
-                </p>
+                <h2 className="text-xl font-bold">Generated Study Timetable</h2>
+                <p className="text-sm text-[#52645f]">Check each session when it is completed.</p>
               </div>
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#bed4cd] bg-[#e8f2ed] px-4 text-sm font-semibold text-[#1f6d5c] transition hover:bg-[#d9ebe4]"
-                onClick={() => setCompleted([])}
-                type="button"
-              >
-                <RefreshCw size={16} />
-                Reset Progress
-              </button>
             </div>
-
-            <div className="mt-5 h-3 overflow-hidden rounded-full bg-[#e7e2d6]">
-              <div
-                className="h-full rounded-full bg-[#1f8a70] transition-all"
-                style={{ width: `${progress}%` }}
-              />
+            <div className="min-w-[170px]">
+              <div className="h-2 overflow-hidden rounded-full bg-[#e6decd]">
+                <div className="h-full rounded-full bg-[#2f8c7d]" style={{ width: `${progress}%` }} />
+              </div>
+              <p className="mt-1 text-right text-xs font-bold text-[#2f7567]">{progress}% complete</p>
             </div>
-            <p className="mt-2 text-sm font-medium text-[#384642]">{progress}% complete</p>
+          </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-2">
-              {plan.map((day) => (
-                <div className="rounded-lg border border-[#d8ddd3] bg-white p-4" key={day.shortDate}>
-                  <div className="mb-3 flex items-center justify-between">
-                    <h2 className="text-base font-semibold text-[#17211f]">{day.label}</h2>
-                    <span className="text-sm text-[#63716c]">{day.shortDate}</span>
+          <div className="mt-4 divide-y divide-[#e2e8e4]">
+            {plan.map((day) => (
+              <article className="py-4 first:pt-0 last:pb-0" key={day.id}>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-bold">{day.name}</h3>
+                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-[#6b7a74]">{day.date}</p>
                   </div>
-                  <div className="space-y-2">
-                    {day.sessions.map((session) => {
-                      const isDone = completed.includes(session.id);
-
-                      return (
-                        <button
-                          className={`flex w-full items-start gap-3 rounded-md border px-3 py-3 text-left transition ${
-                            isDone
-                              ? 'border-[#acd4c9] bg-[#eef8f4]'
-                              : 'border-[#e0e4dd] bg-[#fbfcf7] hover:border-[#1f8a70]'
-                          }`}
-                          key={session.id}
-                          onClick={() => toggleComplete(session.id)}
-                          type="button"
-                        >
-                          <span
-                            className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md ${
-                              isDone ? 'bg-[#1f8a70] text-white' : 'bg-[#e7e2d6] text-[#6a5a43]'
-                            }`}
-                          >
-                            <CheckCircle2 size={16} />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-semibold text-[#17211f]">
-                              {session.subject}
-                            </span>
-                            <span className="block text-xs text-[#63716c]">
-                              {session.minutes} min - {session.focus}
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <span className="rounded-md bg-[#eef3ef] px-3 py-1 text-xs font-bold text-[#2f7567]">
+                    {day.sessions.length} sessions
+                  </span>
                 </div>
-              ))}
-            </div>
-          </Panel>
 
-          <Panel>
-            <Heading icon={<Target size={20} />} title="Priority Overview" />
+                <div className="grid gap-2">
+                  {day.sessions.map((session) => {
+                    const isDone = completed.includes(session.id);
+
+                    return (
+                      <button
+                        className={`grid w-full grid-cols-[32px_minmax(0,1fr)] gap-3 rounded-md border p-3 text-left transition sm:grid-cols-[32px_132px_minmax(0,1fr)_80px] ${
+                          isDone
+                            ? 'border-[#9bcec3] bg-[#effaf6]'
+                            : 'border-[#d9e1dc] bg-[#fbfcf8] hover:border-[#2f8c7d]'
+                        }`}
+                        key={session.id}
+                        onClick={() => toggleComplete(session.id)}
+                        type="button"
+                      >
+                        <span
+                          className={`grid h-8 w-8 place-items-center rounded-md ${
+                            isDone ? 'bg-[#2f8c7d] text-white' : 'bg-[#e6decd] text-[#6c604e]'
+                          }`}
+                        >
+                          <Check size={16} />
+                        </span>
+                        <span className="text-sm font-bold text-[#12201c] sm:pt-1">
+                          {session.start} - {session.end}
+                        </span>
+                        <span className="min-w-0 sm:pt-1">
+                          <span className="block truncate text-sm font-bold text-[#12201c]">{session.subject}</span>
+                          <span className="block text-xs text-[#52645f]">{session.focus}</span>
+                        </span>
+                        <span className="col-start-2 rounded-md bg-white px-2 py-1 text-xs font-bold text-[#d95f43] sm:col-start-auto sm:justify-self-end">
+                          {session.minutes} min
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <aside className="space-y-5">
+          <section className="rounded-lg border border-[#cbd8d0] bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-3">
+              <IconBox>
+                <Target size={20} />
+              </IconBox>
+              <h2 className="text-lg font-bold">Subject Priority</h2>
+            </div>
             <div className="mt-5 space-y-4">
               {subjects.map((subject) => {
-                const score = difficultyWeight[subject.difficulty] * 18 + Math.max(8, 28 - daysUntil(subject.examDate));
+                const score =
+                  difficultyWeight[subject.difficulty] * 18 + Math.max(8, 28 - daysUntil(subject.examDate));
 
                 return (
                   <div key={subject.id}>
                     <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                      <span className="font-medium text-[#384642]">{subject.name}</span>
-                      <span className="text-[#63716c]">{subject.difficulty}</span>
+                      <span className="min-w-0 truncate font-bold">{subject.name}</span>
+                      <span className="text-[#52645f]">{subject.difficulty}</span>
                     </div>
-                    <div className="h-3 overflow-hidden rounded-full bg-[#e7e2d6]">
-                      <div
-                        className="h-full rounded-full bg-[#f06d4f]"
-                        style={{ width: `${Math.min(100, score)}%` }}
-                      />
+                    <div className="h-3 overflow-hidden rounded-full bg-[#e6decd]">
+                      <div className="h-full rounded-full bg-[#d95f43]" style={{ width: `${Math.min(100, score)}%` }} />
                     </div>
                   </div>
                 );
               })}
             </div>
-          </Panel>
-        </section>
+          </section>
+
+          <section className="rounded-lg border border-[#cbd8d0] bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-3">
+              <IconBox>
+                <Sparkles size={20} />
+              </IconBox>
+              <h2 className="text-lg font-bold">Smart Study Tips</h2>
+            </div>
+            <ul className="mt-4 space-y-3 text-sm leading-6 text-[#52645f]">
+              <li>Study difficult subjects first when your energy is highest.</li>
+              <li>Use practice questions after reading each topic.</li>
+              <li>Take a 10-minute break between sessions.</li>
+              <li>Review weak topics again before the exam date.</li>
+            </ul>
+          </section>
+        </aside>
       </section>
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-20 bg-[#12201c]/45 px-4 py-5 backdrop-blur-sm">
+          <div className="mx-auto max-h-[calc(100vh-40px)] max-w-3xl overflow-y-auto rounded-lg bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#e2e8e4] bg-white px-4 py-4 sm:px-5">
+              <div>
+                <h2 className="text-xl font-bold">Plan Inputs</h2>
+                <p className="text-sm text-[#52645f]">Change subjects, difficulty, exam dates, and study time.</p>
+              </div>
+              <button
+                className="grid h-10 w-10 place-items-center rounded-md border border-[#d9e1dc] text-[#52645f] transition hover:bg-[#eef3ef]"
+                onClick={() => setSettingsOpen(false)}
+                title="Close"
+                type="button"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-5">
+              <label className="block text-sm font-bold">
+                Daily study time
+                <input
+                  className="mt-3 w-full accent-[#2f8c7d]"
+                  max="6"
+                  min="1"
+                  onChange={(event) => setDailyHours(Number(event.target.value))}
+                  type="range"
+                  value={dailyHours}
+                />
+              </label>
+              <div className="mt-2 flex items-center justify-between text-sm text-[#52645f]">
+                <span>1 hour</span>
+                <strong className="rounded-md bg-[#e7f4ef] px-3 py-1 text-[#2f7567]">{dailyHours} hours per day</strong>
+                <span>6 hours</span>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                {subjects.map((subject) => (
+                  <div className="rounded-lg border border-[#d9e1dc] bg-[#fbfcf8] p-3" key={subject.id}>
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_160px_40px]">
+                      <label className="text-xs font-bold uppercase tracking-[0.08em] text-[#6b7a74]">
+                        Subject
+                        <input
+                          className="mt-1 h-10 w-full rounded-md border border-[#cbd8d0] bg-white px-3 text-sm font-medium outline-none focus:border-[#2f8c7d] focus:ring-2 focus:ring-[#2f8c7d]/20"
+                          onChange={(event) => updateSubject(subject.id, 'name', event.target.value)}
+                          value={subject.name}
+                        />
+                      </label>
+                      <label className="text-xs font-bold uppercase tracking-[0.08em] text-[#6b7a74]">
+                        Difficulty
+                        <select
+                          className="mt-1 h-10 w-full rounded-md border border-[#cbd8d0] bg-white px-3 text-sm font-medium outline-none focus:border-[#2f8c7d] focus:ring-2 focus:ring-[#2f8c7d]/20"
+                          onChange={(event) => updateSubject(subject.id, 'difficulty', event.target.value as Difficulty)}
+                          value={subject.difficulty}
+                        >
+                          <option>Low</option>
+                          <option>Medium</option>
+                          <option>High</option>
+                        </select>
+                      </label>
+                      <label className="text-xs font-bold uppercase tracking-[0.08em] text-[#6b7a74]">
+                        Exam Date
+                        <input
+                          className="mt-1 h-10 w-full rounded-md border border-[#cbd8d0] bg-white px-3 text-sm font-medium outline-none focus:border-[#2f8c7d] focus:ring-2 focus:ring-[#2f8c7d]/20"
+                          onChange={(event) => updateSubject(subject.id, 'examDate', event.target.value)}
+                          type="date"
+                          value={subject.examDate}
+                        />
+                      </label>
+                      <button
+                        className="grid h-10 w-10 place-items-center self-end rounded-md border border-[#ecc9bf] text-[#bf5037] transition hover:bg-[#fff0eb]"
+                        onClick={() => removeSubject(subject.id)}
+                        title="Remove subject"
+                        type="button"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-between">
+                <button
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-[#cbd8d0] px-4 text-sm font-bold text-[#2f7567] transition hover:bg-[#eef3ef]"
+                  onClick={addSubject}
+                  type="button"
+                >
+                  <Plus size={17} />
+                  Add Subject
+                </button>
+                <button
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#2f8c7d] px-5 text-sm font-bold text-white transition hover:bg-[#25796c]"
+                  onClick={() => setSettingsOpen(false)}
+                  type="button"
+                >
+                  <CheckCircle2 size={17} />
+                  Generate Plan
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
-function Panel({ children }: { children: React.ReactNode }) {
+function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-[#d8ddd3] bg-white p-4 shadow-sm sm:p-5">
-      {children}
-    </div>
-  );
-}
-
-function Heading({ icon, title }: { icon: React.ReactNode; title: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="grid h-9 w-9 place-items-center rounded-md bg-[#e8f2ed] text-[#1f6d5c]">
+    <div className="rounded-lg border border-[#cbd8d0] bg-white p-3 shadow-sm">
+      <div className="flex items-center gap-2 text-[#2f7567]">
         {icon}
-      </span>
-      <h2 className="text-lg font-semibold tracking-normal text-[#17211f]">{title}</h2>
-    </div>
-  );
-}
-
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-[#d8ddd3] bg-[#fbfcf7] p-3">
-      <div className="flex items-center gap-2 text-[#1f6d5c]">
-        {icon}
-        <span className="text-xs font-medium text-[#63716c]">{label}</span>
+        <span className="text-xs font-bold text-[#52645f]">{label}</span>
       </div>
-      <strong className="mt-2 block text-xl font-semibold text-[#17211f]">{value}</strong>
+      <strong className="mt-2 block text-xl font-bold">{value}</strong>
     </div>
+  );
+}
+
+function IconBox({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="grid h-10 w-10 place-items-center rounded-md bg-[#e7f4ef] text-[#2f7567]">
+      {children}
+    </span>
   );
 }
