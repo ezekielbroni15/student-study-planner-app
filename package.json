@@ -1,14 +1,14 @@
 {
-  "name": "sites-project",
+  "name": "study-planner",
   "version": "0.1.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev",
-    "build": "vinext build",
-    "start": "wrangler dev --config dist/server/wrangler.json",
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite --host 127.0.0.1",
     "lint": "oxlint",
     "format": "oxfmt"
   },
